@@ -7,10 +7,6 @@
       "matchPackageNames": ["@napi/cli", "napi", "napi-build", "napi-derive"],
       "addLabels": ["napi-rs"],
       "groupName": "napi-rs"
-    },
-    {
-      "matchPackagePatterns": ["^eslint", "^@typescript-eslint"],
-      "groupName": "linter"
     }
   ],
   "commitMessagePrefix": "chore: ",

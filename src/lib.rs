@@ -1,8 +1,5 @@
-#![deny(clippy::all)]
+#[cfg(target_os = "macos")]
+mod macos;
 
-use napi_derive::napi;
-
-#[napi]
-pub fn plus_100(input: u32) -> u32 {
-  input + 100
-}
+#[cfg(target_os = "macos")]
+pub use macos::*;
