@@ -20,10 +20,11 @@ pnpm add @napi-rs/network-change
 ## Usage
 
 ```typescript
-import { NwPathMonitor } from '@napi-rs/network-change'
+import { NwPathMonitor } from '@napi-rs/network-change';
 
-const monitor = new NwPathMonitor()
+
+const monitor = new NwPathMonitor();
 monitor.start((path) => {
-  console.log('network change', path)
-})
+  console.log('network change', path);
+});
 ```
