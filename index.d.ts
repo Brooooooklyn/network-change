@@ -29,7 +29,7 @@ export declare enum NWInterfaceType {
   /** nw_interface_type_wired A Wired Ethernet link */
   Wired = 3,
   /** nw_interface_type_loopback A Loopback link */
-  Loopback = 4
+  Loopback = 4,
 }
 
 export interface NwPath {
@@ -42,13 +42,14 @@ export interface NwPath {
 }
 
 /** A network path status indicates if there is a usable route available upon which to send and receive data. */
-export type NWPathStatus = /** nw_path_status_invalid The path is not valid */
-'Invalid'|
-/** nw_path_status_satisfied The path is valid and satisfies the required constraints */
-'Satisfied'|
-/** nw_path_status_unsatisfied The path is valid| but does not satisfy the required constraints */
-'Unsatisfied'|
-/** nw_path_status_satisfiable The path is potentially valid| but a connection is required */
-'Satisfiable'|
-/** Reserved for future use */
-'Unknown';
+export type NWPathStatus =
+  /** nw_path_status_invalid The path is not valid */
+  | 'Invalid'
+  /** nw_path_status_satisfied The path is valid and satisfies the required constraints */
+  | 'Satisfied'
+  /** nw_path_status_unsatisfied The path is valid| but does not satisfy the required constraints */
+  | 'Unsatisfied'
+  /** nw_path_status_satisfiable The path is potentially valid| but a connection is required */
+  | 'Satisfiable'
+  /** Reserved for future use */
+  | 'Unknown'
