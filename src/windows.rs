@@ -1,4 +1,5 @@
 use std::mem::MaybeUninit;
+use std::sync::{LazyLock, Mutex};
 
 use windows::Win32::Networking::NetworkListManager::*;
 use windows::Win32::System::Com::*;
@@ -34,8 +35,8 @@ pub struct InternetMonitor {
   connection_point_container: Option<IConnectionPointContainer>,
 }
 
-static global_handler: LazyLock<Mutex<Box<dyn Fn(ConnectionStatus) + Send + 'static>>> =
-  LazyLock::new(|| Mutex::new(Box::new(|status: ConnectionStatus| {})));
+static global_handler: LazyLock<Mutex<Option<Box<dyn Fn(ConnectionStatus) + Send + 'static>>>> =
+  LazyLock::new(|| Mutex::new(None));
 
 #[napi]
 impl InternetMonitor {
@@ -58,9 +59,9 @@ impl InternetMonitor {
       .weak::<false>()
       .build_callback(ctx_to_path)?;
 
-    *global_handler.lock().unwrap() = Box::new(move |status| {
+    *global_handler.lock().unwrap() = Some(Box::new(move |status| {
       change_handler.call(status, ThreadsafeFunctionCallMode::NonBlocking);
-    });
+    }));
 
     // SAFETY: Windows API requires unsafe block
     unsafe {
@@ -134,7 +135,7 @@ impl InternetMonitor {
       self.connection_point = None;
       self.connection_point_container = None;
       self.mgr = None;
-
+      *global_handler.lock().unwrap() = None;
       CoUninitialize();
     }
     Ok(())
