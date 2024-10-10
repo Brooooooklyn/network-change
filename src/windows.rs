@@ -1,10 +1,7 @@
 use std::mem::MaybeUninit;
-use std::sync::atomic::AtomicBool;
-use std::sync::{LazyLock, Mutex};
 
 use windows::Win32::Networking::NetworkListManager::*;
 use windows::Win32::System::Com::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
 use windows_core::{implement, Interface, HRESULT};
 
 use napi::bindgen_prelude::*;
