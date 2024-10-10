@@ -30,25 +30,26 @@ pub struct ConnectionStatus {
 
 #[napi]
 pub struct InternetMonitor {
-  mgr: NetworkListManagerEvents,
+  mgr: Option<INetworkListManagerEvents>,
   advise_cookie: Option<u32>,
+  network_list_manager: Option<INetworkListManager>,
+  connection_point: Option<IConnectionPoint>,
+  connection_point_container: Option<IConnectionPointContainer>,
 }
 
 static global_handler: LazyLock<Mutex<Box<dyn Fn(ConnectionStatus) + Send + 'static>>> =
   LazyLock::new(|| Mutex::new(Box::new(|status: ConnectionStatus| {})));
-
-static global_thread: LazyLock<Mutex<Option<std::thread::JoinHandle<()>>>> =
-  LazyLock::new(|| Mutex::new(None));
-
-static global_run_flag: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBool::new(false));
 
 #[napi]
 impl InternetMonitor {
   #[napi(constructor)]
   pub fn new() -> Result<Self> {
     Ok(Self {
-      mgr: NetworkListManagerEvents,
+      mgr: None,
       advise_cookie: None,
+      network_list_manager: None,
+      connection_point: None,
+      connection_point_container: None,
     })
   }
 
@@ -66,8 +67,9 @@ impl InternetMonitor {
 
     // SAFETY: Windows API requires unsafe block
     unsafe {
-      if CoInitialize(None).is_err() {
-        return Err(Error::new(Status::GenericFailure, "CoInitialize failed"));
+      // https://stackoverflow.com/a/2979671
+      if CoInitializeEx(None, COINIT_MULTITHREADED).is_err() {
+        return Err(Error::new(Status::GenericFailure, "CoInitializeEx failed"));
       }
 
       let network_list_manager: windows_core::Result<INetworkListManager> =
@@ -81,6 +83,7 @@ impl InternetMonitor {
           &IConnectionPointContainer::IID,
           connection_point_container.as_mut_ptr() as *mut _,
         );
+        self.network_list_manager = Some(network_list_manager);
 
         if hr.is_ok() {
           // SAFETY: connection_point_container is initialized when query is successful
@@ -89,33 +92,21 @@ impl InternetMonitor {
 
           let connection_point =
             connection_point_container.FindConnectionPoint(&INetworkListManagerEvents::IID);
+          self.connection_point_container = Some(connection_point_container);
           if hr.is_ok() {
             let connection_point: IConnectionPoint = connection_point.unwrap();
 
             let network_event: INetworkListManagerEvents = NetworkListManagerEvents.into();
-            let advise_cookie_result = connection_point.Advise(&network_event);
+            self.mgr = Some(network_event);
+            let advise_cookie_result = connection_point.Advise(self.mgr.as_ref().unwrap());
             if advise_cookie_result.is_ok() {
               self.advise_cookie = Some(advise_cookie_result.unwrap());
+              self.connection_point = Some(connection_point);
             } else {
               return Err(Error::new(
                 Status::GenericFailure,
                 "IConnectionPoint::Advise failed",
               ));
-            }
-
-            global_run_flag.store(true, std::sync::atomic::Ordering::Release);
-
-            let mut thread = global_thread.lock().unwrap();
-            if thread.is_none() {
-              thread.replace(std::thread::spawn(move || {
-                while global_run_flag.load(std::sync::atomic::Ordering::Acquire) {
-                  let mut msg: MSG = MSG::default();
-                  while GetMessageA(&mut msg, None, 0, 0).as_bool() {
-                    let _ = TranslateMessage(&msg);
-                    DispatchMessageA(&msg);
-                  }
-                }
-              }));
             }
           } else {
             return Err(Error::new(
@@ -136,12 +127,19 @@ impl InternetMonitor {
 
   #[napi]
   pub fn stop(&mut self) -> Result<()> {
-    global_run_flag.store(false, std::sync::atomic::Ordering::Release);
-    global_thread
-      .lock()
-      .unwrap()
-      .take()
-      .and_then(|h| h.join().ok());
+    // SAFETY: Windows API requires unsafe block
+    unsafe {
+      if let Some(advise_cookie) = self.advise_cookie {
+        if let Some(connection_point) = self.connection_point.as_ref() {
+          let _ = connection_point.Unadvise(advise_cookie);
+        }
+      }
+      self.connection_point = None;
+      self.connection_point_container = None;
+      self.mgr = None;
+
+      CoUninitialize();
+    }
     Ok(())
   }
 }
