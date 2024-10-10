@@ -3,7 +3,7 @@ use std::sync::{LazyLock, Mutex};
 
 use windows::Win32::Networking::NetworkListManager::*;
 use windows::Win32::System::Com::*;
-use windows_core::{implement, Interface, HRESULT};
+use windows_core::{implement, Interface};
 
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunctionCallMode};
@@ -35,7 +35,7 @@ pub struct InternetMonitor {
   connection_point_container: Option<IConnectionPointContainer>,
 }
 
-static global_handler: LazyLock<Mutex<Option<Box<dyn Fn(ConnectionStatus) + Send + 'static>>>> =
+static GLOBAL_HANDLER: LazyLock<Mutex<Option<Box<dyn Fn(ConnectionStatus) + Send + 'static>>>> =
   LazyLock::new(|| Mutex::new(None));
 
 #[napi]
@@ -59,7 +59,7 @@ impl InternetMonitor {
       .weak::<false>()
       .build_callback(ctx_to_path)?;
 
-    *global_handler.lock().unwrap() = Some(Box::new(move |status| {
+    *GLOBAL_HANDLER.lock().unwrap() = Some(Box::new(move |status| {
       change_handler.call(status, ThreadsafeFunctionCallMode::NonBlocking);
     }));
 
@@ -75,9 +75,8 @@ impl InternetMonitor {
 
       let mut connection_point_container: MaybeUninit<IConnectionPointContainer> =
         MaybeUninit::uninit();
-      let mut hr: HRESULT = Default::default();
       if let Ok(network_list_manager) = network_list_manager {
-        hr = network_list_manager.query(
+        let hr = network_list_manager.query(
           &IConnectionPointContainer::IID,
           connection_point_container.as_mut_ptr() as *mut _,
         );
@@ -91,7 +90,7 @@ impl InternetMonitor {
           let connection_point =
             connection_point_container.FindConnectionPoint(&INetworkListManagerEvents::IID);
           self.connection_point_container = Some(connection_point_container);
-          if hr.is_ok() {
+          if connection_point.is_ok() {
             let connection_point: IConnectionPoint = connection_point.unwrap();
 
             let network_event: INetworkListManagerEvents = NetworkListManagerEvents.into();
@@ -135,7 +134,7 @@ impl InternetMonitor {
       self.connection_point = None;
       self.connection_point_container = None;
       self.mgr = None;
-      *global_handler.lock().unwrap() = None;
+      *GLOBAL_HANDLER.lock().unwrap() = None;
       CoUninitialize();
     }
     Ok(())
@@ -157,7 +156,7 @@ impl INetworkListManagerEvents_Impl for NetworkListManagerEvents_Impl {
     let ipv6_internet =
       new_connectivity.0 & NLM_CONNECTIVITY_IPV6_INTERNET.0 == NLM_CONNECTIVITY_IPV6_INTERNET.0;
 
-    global_handler.lock().unwrap()(ConnectionStatus {
+    (*GLOBAL_HANDLER.lock().unwrap()).as_ref().unwrap()(ConnectionStatus {
       disconnected,
       ipv4_internet,
       ipv6_internet,
