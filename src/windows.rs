@@ -66,9 +66,9 @@ impl InternetMonitor {
     // SAFETY: Windows API requires unsafe block
     unsafe {
       // https://stackoverflow.com/a/2979671
-      if CoInitializeEx(None, COINIT_MULTITHREADED).is_err() {
-        return Err(Error::new(Status::GenericFailure, "CoInitializeEx failed"));
-      }
+      CoInitializeEx(None, COINIT_MULTITHREADED)
+        .ok()
+        .map_err(|_| Error::new(Status::GenericFailure, "CoInitializeEx failed"))?;
 
       let network_list_manager: windows_core::Result<INetworkListManager> =
         CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL);
@@ -76,47 +76,41 @@ impl InternetMonitor {
       let mut connection_point_container: MaybeUninit<IConnectionPointContainer> =
         MaybeUninit::uninit();
       if let Ok(network_list_manager) = network_list_manager {
-        let hr = network_list_manager.query(
-          &IConnectionPointContainer::IID,
-          connection_point_container.as_mut_ptr() as *mut _,
-        );
+        network_list_manager
+          .query(
+            &IConnectionPointContainer::IID,
+            connection_point_container.as_mut_ptr() as *mut _,
+          )
+          .ok()
+          .map_err(|e| {
+            Error::new(
+              Status::GenericFailure,
+              "INetworkListManager::QueryInterface failed",
+            )
+          })?;
         self.network_list_manager = Some(network_list_manager);
 
-        if hr.is_ok() {
-          // SAFETY: connection_point_container is initialized when query is successful
-          let connection_point_container: IConnectionPointContainer =
-            connection_point_container.assume_init();
+        // SAFETY: connection_point_container is initialized when query is successful
+        let connection_point_container: IConnectionPointContainer =
+          connection_point_container.assume_init();
 
-          let connection_point =
-            connection_point_container.FindConnectionPoint(&INetworkListManagerEvents::IID);
-          self.connection_point_container = Some(connection_point_container);
-          if connection_point.is_ok() {
-            let connection_point: IConnectionPoint = connection_point.unwrap();
-
-            let network_event: INetworkListManagerEvents = NetworkListManagerEvents.into();
-            self.mgr = Some(network_event);
-            let advise_cookie_result = connection_point.Advise(self.mgr.as_ref().unwrap());
-            if advise_cookie_result.is_ok() {
-              self.advise_cookie = Some(advise_cookie_result.unwrap());
-              self.connection_point = Some(connection_point);
-            } else {
-              return Err(Error::new(
-                Status::GenericFailure,
-                "IConnectionPoint::Advise failed",
-              ));
-            }
-          } else {
-            return Err(Error::new(
+        let connection_point = connection_point_container
+          .FindConnectionPoint(&INetworkListManagerEvents::IID)
+          .map_err(|_| {
+            Error::new(
               Status::GenericFailure,
               "FindConnectionPoint::FindConnectionPoint failed",
-            ));
-          }
-        } else {
-          return Err(Error::new(
-            Status::GenericFailure,
-            "INetworkListManager::QueryInterface failed",
-          ));
-        }
+            )
+          })?;
+        self.connection_point_container = Some(connection_point_container);
+
+        let network_event: INetworkListManagerEvents = NetworkListManagerEvents.into();
+        self.mgr = Some(network_event);
+        let advise_cookie_result = connection_point
+          .Advise(self.mgr.as_ref().unwrap())
+          .map_err(|_| Error::new(Status::GenericFailure, "IConnectionPoint::Advise failed"));
+        self.advise_cookie = Some(advise_cookie_result.unwrap());
+        self.connection_point = Some(connection_point);
       }
     }
     Ok(())
@@ -126,12 +120,14 @@ impl InternetMonitor {
   pub fn stop(&mut self) -> Result<()> {
     // SAFETY: Windows API requires unsafe block
     unsafe {
-      if let Some(advise_cookie) = self.advise_cookie {
-        if let Some(connection_point) = self.connection_point.as_ref() {
-          let _ = connection_point.Unadvise(advise_cookie);
-        }
-      }
-      self.connection_point = None;
+      let advise_cookie = self.advise_cookie.take();
+      let connection_point = self.connection_point.take();
+
+      // https://stackoverflow.com/a/33779802
+      advise_cookie.and_then(|advise_cookie| {
+        connection_point.map(|connection_point| connection_point.Unadvise(advise_cookie))
+      });
+
       self.connection_point_container = None;
       self.mgr = None;
       *GLOBAL_HANDLER.lock().unwrap() = None;
