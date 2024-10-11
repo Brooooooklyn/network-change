@@ -82,7 +82,7 @@ impl InternetMonitor {
             connection_point_container.as_mut_ptr() as *mut _,
           )
           .ok()
-          .map_err(|e| {
+          .map_err(|_| {
             Error::new(
               Status::GenericFailure,
               "INetworkListManager::QueryInterface failed",
