@@ -16,6 +16,17 @@ napi-derive = "3.0.0-alpha.13"
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.5"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58.0", features = [
+    # for INetworkListManager
+    "Win32_Networking_NetworkListManager",
+    # for COM interfaces
+    "Win32_System_Com",
+    # for implementing INetworkListManagerEvents
+    "implement",
+] }
+windows-core = "0.58.0"
+
 [build-dependencies]
 napi-build = "2"
 
