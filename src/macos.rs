@@ -5,15 +5,7 @@ use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 
-#[napi(object, object_from_js = false)]
-pub struct NWPath {
-  pub status: NWPathStatus,
-  pub is_expensive: bool,
-  pub is_constrained: bool,
-  pub has_ipv4: bool,
-  pub has_ipv6: bool,
-  pub has_dns: bool,
-}
+use crate::{NetworkInfo as NWPath, NetworkStatus as NWPathStatus};
 
 #[napi]
 /// Interface types represent the underlying media for a network link, such as Wi-Fi or Cellular.
@@ -28,21 +20,6 @@ pub enum NWInterfaceType {
   Wired,
   /// nw_interface_type_loopback A Loopback link
   Loopback,
-}
-
-#[napi(string_enum)]
-/// A network path status indicates if there is a usable route available upon which to send and receive data.
-pub enum NWPathStatus {
-  /// nw_path_status_invalid The path is not valid
-  Invalid,
-  /// nw_path_status_satisfied The path is valid and satisfies the required constraints
-  Satisfied,
-  /// nw_path_status_unsatisfied The path is valid, but does not satisfy the required constraints
-  Unsatisfied,
-  /// nw_path_status_satisfiable The path is potentially valid, but a connection is required
-  Satisfiable,
-  /// Reserved for future use
-  Unknown,
 }
 
 impl From<ffi::nw_path_status_t> for NWPathStatus {
@@ -148,7 +125,7 @@ fn ctx_to_path(ctx: ThreadsafeCallContext<ffi::nw_path_t>) -> Result<NWPath> {
   Ok(NWPath {
     status: unsafe { ffi::nw_path_get_status(ctx.value).into() },
     is_expensive: unsafe { ffi::nw_path_is_expensive(ctx.value) },
-    is_constrained: unsafe { ffi::nw_path_is_constrained(ctx.value) },
+    is_low_data_mode: unsafe { ffi::nw_path_is_constrained(ctx.value) },
     has_ipv4: unsafe { ffi::nw_path_has_ipv4(ctx.value) },
     has_ipv6: unsafe { ffi::nw_path_has_ipv6(ctx.value) },
     has_dns: unsafe { ffi::nw_path_has_dns(ctx.value) },
