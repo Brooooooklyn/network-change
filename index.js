@@ -361,7 +361,5 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-module.exports.NwPathMonitor = nativeBinding.NwPathMonitor
-module.exports.NWPathMonitor = nativeBinding.NWPathMonitor
-module.exports.NWInterfaceType = nativeBinding.NWInterfaceType
-module.exports.NWPathStatus = nativeBinding.NWPathStatus
+module.exports.InternetMonitor = nativeBinding.InternetMonitor
+module.exports.NetworkStatus = nativeBinding.NetworkStatus

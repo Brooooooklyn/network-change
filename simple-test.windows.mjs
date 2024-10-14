@@ -2,12 +2,10 @@ import { InternetMonitor } from './index.js'
 
 const pm = new InternetMonitor()
 
+console.log(pm.current())
+
 pm.start((path) => {
   console.log(`Network status: `, path)
-  pm.stop()
-  pm.start((path) => {
-    console.log(`Network status2: `, path)
-  })
 })
 
 setTimeout(() => {
