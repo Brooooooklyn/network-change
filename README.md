@@ -5,7 +5,7 @@
 **Observe network change event in Node.js.**
 
 > [!IMPORTANT]
-> This package is working in progress, and only support macOS now.
+> This package is working in progress, and only support Windows and macOS now.
 
 ## Install
 
