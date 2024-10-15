@@ -10,8 +10,8 @@ version = "0.1.0"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi        = { version = "3.0.0-alpha.13", features = ["napi4"] }
-napi-derive = "3.0.0-alpha.13"
+napi        = { version = "3.0.0-alpha", features = ["napi4"] }
+napi-derive = "3.0.0-alpha"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.5"
