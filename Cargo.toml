@@ -35,6 +35,10 @@ windows = { version = "0.58.0", features = [
 ] }
 windows-core = "0.58.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gio = "0.20.4"
+glib = "0.20.4"
+
 [build-dependencies]
 napi-build = "2"
 
