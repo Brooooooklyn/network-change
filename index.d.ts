@@ -3,12 +3,12 @@
 export declare class InternetMonitor {
   constructor()
   current(): NetworkInfo
-  /** Start the path monitor, it will keep the Node.js alive unless you call stop on it. */
+  /** Start the InternetMonitor, it will keep the Node.js alive unless you call stop on it. */
   start(onUpdate: (arg: NetworkInfo) => void): void
-  /** Start the path monitor with weak reference, it will not keep the Node.js alive. */
+  /** Start the InternetMonitor with weak reference, it will not keep the Node.js alive. */
   startWeak(onUpdate: (arg: NetworkInfo) => void): void
   /**
-   * Stop the path monitor.
+   * Stop the InternetMonitor.
    *
    * If you don't call this method and leave the monitor alone, it will be stopped automatically when it is GC.
    */
