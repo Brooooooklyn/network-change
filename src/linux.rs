@@ -2,7 +2,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::NetworkInfo;
 use crate::NetworkStatus;
-use ffi::NMClient;
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{
   ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
@@ -27,7 +26,7 @@ static GLOBAL_HANDLER: LazyLock<Mutex<Option<Box<dyn Fn(NetworkInfo) + 'static +
   LazyLock::new(|| Mutex::new(None));
 
 #[derive(Clone, Copy)]
-struct MainLoopWrapper(*mut glib::MainLoop);
+struct MainLoopWrapper(*mut ffi::GMainLoop);
 unsafe impl Send for MainLoopWrapper {}
 unsafe impl Sync for MainLoopWrapper {}
 
@@ -44,7 +43,7 @@ impl Drop for InternetMonitor {
     println!("Dropping InternetMonitor");
     self.stop();
     unsafe {
-      (*self.lo.0).quit();
+      ffi::g_main_loop_quit(self.lo.0);
     }
     if let Some(thread_handle) = self.thread_handle.take() {
       thread_handle.join().unwrap();
@@ -66,13 +65,11 @@ impl InternetMonitor {
 
     network_changed_cb(client, std::ptr::null_mut(), std::ptr::null_mut());
 
-    let lo = MainLoopWrapper(Box::leak(Box::new(glib::MainLoop::new(None, false))));
+    let lo = MainLoopWrapper(unsafe { ffi::g_main_loop_new(core::ptr::null_mut(), 0) });
     let thread_handle = std::thread::spawn(move || {
       let l = lo;
       // SAFETY: we know we already init it before AND no other thread will access it.
-      unsafe {
-        (*l.0).run();
-      }
+      unsafe { ffi::g_main_loop_run(l.0) }
     });
 
     Ok(Self {
@@ -160,7 +157,7 @@ fn ctx_to_path(ctx: ThreadsafeCallContext<NetworkInfo>) -> Result<NetworkInfo> {
 }
 
 extern "C" fn network_changed_cb(
-  client: *mut NMClient,
+  client: *mut ffi::NMClient,
   _: *mut core::ffi::c_void,
   _: *mut core::ffi::c_void,
 ) {
@@ -231,8 +228,6 @@ extern "C" fn network_changed_cb(
 #[allow(non_snake_case)]
 #[allow(unused)]
 mod ffi {
-  use gio::Cancellable;
-  use glib::error::Error as GError;
   pub use std::ffi::{c_char, c_int, c_ulong, c_void};
 
   macro_rules! enum_with_val {
@@ -300,6 +295,16 @@ mod ffi {
     _unused: [u8; 0],
   }
 
+  #[repr(C)]
+  pub struct Cancellable {
+    _unused: [u8; 0],
+  }
+
+  #[repr(C)]
+  pub struct GError {
+    _unused: [u8; 0],
+  }
+
   enum_with_val! {
       #[derive(PartialEq, Eq, Clone, Copy)]
       pub struct NMDeviceType(c_int) {
@@ -360,7 +365,19 @@ mod ffi {
 
   pub type gchar = c_char;
   pub type gulong = c_ulong;
+  pub type gint = c_int;
   pub type GClosureNotify = extern "C" fn();
+  pub type gboolean = gint;
+
+  #[repr(C)]
+  pub struct GMainContext {
+    _unused: [u8; 0],
+  }
+
+  #[repr(C)]
+  pub struct GMainLoop {
+    _unused: [u8; 0],
+  }
   #[cfg_attr(any(target_os = "linux",), link(name = "glib-2.0", kind = "dylib"))]
   extern "C" {
     fn g_signal_connect_data(
@@ -372,6 +389,10 @@ mod ffi {
       connect_flags: c_int,
     ) -> gulong;
     pub fn g_signal_handler_disconnect(instance: *mut NMClient, signal_id: gulong);
+
+    pub fn g_main_loop_new(context: *mut GMainContext, is_running: gboolean) -> *mut GMainLoop;
+    pub fn g_main_loop_run(lo: *mut GMainLoop);
+    pub fn g_main_loop_quit(lo: *mut GMainLoop);
   }
 
   pub unsafe fn g_signal_connect(
