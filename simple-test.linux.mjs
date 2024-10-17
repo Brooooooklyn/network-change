@@ -6,6 +6,10 @@ console.log(`Network status: `, pm.current())
 
 pm.start((path) => {
   console.log(`Network status: `, path)
+  pm.stop();
+  pm.start((path) => {
+    console.log(`Network status inner: `, path)
+  })
 })
 
 setTimeout(() => {

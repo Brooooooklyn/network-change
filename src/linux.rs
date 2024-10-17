@@ -1,15 +1,13 @@
 use std::sync::{Arc, LazyLock, Mutex};
 
+use crate::NetworkInfo;
+use crate::NetworkStatus;
+use ffi::NMClient;
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{
   ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
 };
 use napi_derive::napi;
-
-use glib::signal::SignalHandlerId;
-
-use crate::NetworkInfo;
-use crate::NetworkStatus;
 
 const SIGNAL_NAME: &std::ffi::CStr = c"notify::connectivity";
 
@@ -28,17 +26,30 @@ static NETWORK_INFO: LazyLock<Mutex<NetworkInfo>> = LazyLock::new(|| {
 static GLOBAL_HANDLER: LazyLock<Mutex<Option<Box<dyn Fn(NetworkInfo) + 'static + Send + Sync>>>> =
   LazyLock::new(|| Mutex::new(None));
 
-#[derive(Copy, Clone)]
-struct NMClientWrapper(*mut ffi::NMClient);
-unsafe impl Send for NMClientWrapper {}
-unsafe impl Sync for NMClientWrapper {}
+#[derive(Clone, Copy)]
+struct MainLoopWrapper(*mut glib::MainLoop);
+unsafe impl Send for MainLoopWrapper {}
+unsafe impl Sync for MainLoopWrapper {}
 
 #[napi]
 pub struct InternetMonitor {
-  client: NMClientWrapper,
-  lo: Arc<Mutex<Option<glib::MainLoop>>>,
-  signal_id: Arc<Mutex<Option<SignalHandlerId>>>,
+  client: *mut ffi::NMClient,
+  signal_id: Arc<Mutex<Option<ffi::gulong>>>,
   thread_handle: Option<std::thread::JoinHandle<()>>,
+  lo: MainLoopWrapper,
+}
+
+impl Drop for InternetMonitor {
+  fn drop(&mut self) {
+    println!("Dropping InternetMonitor");
+    self.stop();
+    unsafe {
+      (*self.lo.0).quit();
+    }
+    if let Some(thread_handle) = self.thread_handle.take() {
+      thread_handle.join().unwrap();
+    }
+  }
 }
 
 #[napi]
@@ -53,13 +64,22 @@ impl InternetMonitor {
       ));
     }
 
-    network_changed_cb(client);
+    network_changed_cb(client, std::ptr::null_mut(), std::ptr::null_mut());
+
+    let lo = MainLoopWrapper(Box::leak(Box::new(glib::MainLoop::new(None, false))));
+    let thread_handle = std::thread::spawn(move || {
+      let l = lo;
+      // SAFETY: we know we already init it before AND no other thread will access it.
+      unsafe {
+        (*l.0).run();
+      }
+    });
 
     Ok(Self {
-      client: NMClientWrapper(client),
-      lo: Arc::new(Mutex::new(None)),
+      client,
       signal_id: Arc::new(Mutex::new(None)),
-      thread_handle: None,
+      thread_handle: Some(thread_handle),
+      lo,
     })
   }
 
@@ -107,27 +127,15 @@ impl InternetMonitor {
         change_handler_for_cost.call(info, ThreadsafeFunctionCallMode::Blocking);
       }));
 
-    let lo = self.lo.clone();
-    let client: NMClientWrapper = self.client;
     let signal_id = self.signal_id.clone();
-    self.thread_handle = Some(std::thread::spawn(move || {
-      let c = client;
-      unsafe {
-        signal_id
-          .lock()
-          .unwrap()
-          .replace(glib::signal::connect_raw::<NetworkInfo>(
-            (c.0) as *const _ as *mut glib::gobject_ffi::GObject,
-            SIGNAL_NAME.as_ptr(),
-            Some(std::mem::transmute::<*const (), unsafe extern "C" fn()>(
-              network_changed_cb as *const (),
-            )),
-            std::ptr::null_mut(),
-          ));
-        lo.lock().unwrap().replace(glib::MainLoop::new(None, false));
-        lo.lock().unwrap().as_ref().unwrap().run();
-      }
-    }));
+    unsafe {
+      signal_id.lock().unwrap().replace(ffi::g_signal_connect(
+        self.client,
+        SIGNAL_NAME.as_ptr(),
+        network_changed_cb,
+        std::ptr::null_mut(),
+      ));
+    }
 
     Ok(())
   }
@@ -138,21 +146,11 @@ impl InternetMonitor {
   /// If you don't call this method and leave the monitor alone, it will be stopped automatically when it is GC.
   pub fn stop(&mut self) {
     let signal_id = self.signal_id.lock().unwrap().take();
-    if let Some(signal_id) = signal_id {
-      unsafe {
-        glib::signal::signal_handler_disconnect(
-          &*self.client.0.cast::<glib::object::Object>(),
-          signal_id,
-        );
+    unsafe {
+      if let Some(signal_id) = signal_id {
+        ffi::g_signal_handler_disconnect(self.client, signal_id);
       }
     }
-
-    let lo = self.lo.lock().unwrap().take();
-    if let Some(lo) = lo {
-      lo.quit();
-    }
-
-    self.thread_handle.take().unwrap().join().unwrap();
   }
 }
 
@@ -161,7 +159,11 @@ fn ctx_to_path(ctx: ThreadsafeCallContext<NetworkInfo>) -> Result<NetworkInfo> {
   Ok(ctx.value)
 }
 
-extern "C" fn network_changed_cb(client: *mut ffi::NMClient) {
+extern "C" fn network_changed_cb(
+  client: *mut NMClient,
+  _: *mut core::ffi::c_void,
+  _: *mut core::ffi::c_void,
+) {
   let mut info = NETWORK_INFO.lock().unwrap();
 
   let metered = unsafe { ffi::nm_client_get_metered(client) };
@@ -231,7 +233,7 @@ extern "C" fn network_changed_cb(client: *mut ffi::NMClient) {
 mod ffi {
   use gio::Cancellable;
   use glib::error::Error as GError;
-  pub use std::ffi::{c_int, c_void};
+  pub use std::ffi::{c_char, c_int, c_ulong, c_void};
 
   macro_rules! enum_with_val {
         ($(#[$meta:meta])* $vis:vis struct $ident:ident($innervis:vis $ty:ty) {
@@ -277,10 +279,7 @@ mod ffi {
     }
   }
 
-  #[repr(C)]
-  pub struct NMClient {
-    _unused: [u8; 0],
-  }
+  pub type NMClient = *mut c_void;
 
   type gpointer = *mut c_void;
   type guint = u32;
@@ -357,5 +356,30 @@ mod ffi {
     pub fn nm_ip_config_get_nameservers(ip_config: *mut NMIPConfig) -> *mut GPtrArray;
     pub fn nm_client_get_connectivity(client: *mut NMClient) -> NMConnectivityState;
     pub fn nm_client_get_metered(client: *mut NMClient) -> NMMetered;
+  }
+
+  pub type gchar = c_char;
+  pub type gulong = c_ulong;
+  pub type GClosureNotify = extern "C" fn();
+  #[cfg_attr(any(target_os = "linux",), link(name = "glib-2.0", kind = "dylib"))]
+  extern "C" {
+    fn g_signal_connect_data(
+      instance: *mut NMClient,
+      detailed_signal: *const gchar,
+      c_handler: extern "C" fn(client: *mut NMClient, _: *mut c_void, user_data: *mut c_void),
+      data: *mut c_void,
+      destroy_data: Option<GClosureNotify>,
+      connect_flags: c_int,
+    ) -> gulong;
+    pub fn g_signal_handler_disconnect(instance: *mut NMClient, signal_id: gulong);
+  }
+
+  pub unsafe fn g_signal_connect(
+    instance: *mut NMClient,
+    detailed_signal: *const gchar,
+    c_handler: extern "C" fn(client: *mut NMClient, _: *mut c_void, user_data: *mut c_void),
+    data: *mut c_void,
+  ) -> gulong {
+    g_signal_connect_data(instance, detailed_signal, c_handler, data, None, 0)
   }
 }
