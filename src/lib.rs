@@ -12,6 +12,12 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::*;
 
+#[cfg(target_os = "linux")]
+mod linux;
+
+#[cfg(target_os = "linux")]
+pub use linux::*;
+
 #[napi(string_enum)]
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -30,7 +36,7 @@ pub enum NetworkStatus {
 }
 
 #[napi(object, object_from_js = false)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NetworkInfo {
   pub status: NetworkStatus,
   pub is_expensive: bool,
